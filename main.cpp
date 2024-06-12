@@ -1,10 +1,17 @@
 #include <iostream>
 #include <string>
 #include <stdexcept> // For std::invalid_argument and std::out_of_range
+#include <pthread.h>
+#include <sys/mman.h>
+#include <sys/wait.h>
+#include <mutex>
 #include "I2c.h"
 #include "Adafruit_ADS1X15.h"
 
 using namespace std;
+
+#define NUM_READINGS 4
+#define BUFFER_SIZE 22
 
 // Function declarations for each mode
 void mode1(Adafruit_ADS1115 &ads) {
@@ -49,7 +56,6 @@ void mode1(Adafruit_ADS1115 &ads) {
     }
         
 }
-
 void mode2(Adafruit_ADS1115 &ads) {
     
     // Add your conversion logic for mode 2 here
@@ -76,9 +82,7 @@ void mode2(Adafruit_ADS1115 &ads) {
     }
 
 }
-
-void mode3(Adafruit_ADS1115 &ads) 
-{
+void mode3(Adafruit_ADS1115 &ads) {
     std::cout << "Mode 3 selected: Performing conversion 3." << std::endl;
     // Add your conversion logic for mode 3 here
     // Example: throw std::runtime_error("Mode 3 error");
@@ -122,15 +126,50 @@ void mode3(Adafruit_ADS1115 &ads)
     usleep(1000);
     }
 }
+void parentProcess(int pipe)
+{
+    int adc_values[4];
 
+    // Read ADC and send data to child
+    // Envoyer les valeurs ADC au processus enfant
+    write(pipe, adc_values, sizeof(int) * NUM_READINGS);
+}
+void childProcess(int pipe)
+{
+    int received_values[4];
+
+    // Lire les valeurs ADC du pipe
+    read(pipe, received_values, sizeof(int) * NUM_READINGS);
+}
 int main(int argc, char* argv[]) {
 
     try {
         if (argc != 2) {
-            throw std::invalid_argument("Usage: " + std::string(argv[0]) + " <mode>\nModes: 1, 2, 3");
+            throw std::invalid_argument("Usage: " + std::string(argv[0]) + " <mode>\nModes: 1, 2, 3 4");
         }
 
         int mode = std::stoi(argv[1]);
+        // Create a shared mutex in memory
+        pthread_mutex_t* mutex = static_cast<pthread_mutex_t*>(mmap(NULL, sizeof(pthread_mutex_t), PROT_READ | PROT_WRITE, MAP_SHARED | MAP_ANONYMOUS, -1, 0));
+        if (mutex == MAP_FAILED) {
+            throw std::invalid_argument("mmap");
+            exit(1);
+        }
+
+        pthread_mutexattr_t attr;
+        pthread_mutexattr_init(&attr);
+        pthread_mutexattr_setpshared(&attr, PTHREAD_PROCESS_SHARED);
+        pthread_mutex_init(mutex, &attr);
+
+        // Create a pipe
+        int pipeFd[2];
+        if (pipe(pipeFd) == -1) {
+            throw std::invalid_argument("pipe");
+            exit(1);
+        }
+
+        pid_t pid = fork();
+
         Adafruit_ADS1115 ads;  /* Use this for the 16-bit version */
 
         switch (mode) {
@@ -158,9 +197,44 @@ int main(int argc, char* argv[]) {
                     return 1;
                 }
                 break;
+            case 4:
+                try {
+                    if (pid > 0) {
+                    // Parent process
+                    while (true) {
+                        close(pipeFd[0]); // Close reading end
+                        pthread_mutex_lock(mutex);
+                        parentProcess(pipeFd[1]);
+                        pthread_mutex_unlock(mutex);
+                        close(pipeFd[1]); // Close writing end
+                        usleep(10000); // 10ms for data acquisition
+                    }
+                    wait(nullptr);
+                } else {
+                    // Child process
+                    while (true) {
+                        close(pipeFd[1]); // Close writing end
+                        pthread_mutex_lock(mutex);
+                        childProcess(pipeFd[0]);
+                        pthread_mutex_unlock(mutex);
+                        close(pipeFd[0]); // Close reading end
+                        usleep(100000); // 100ms for data display
+                    }
+                }
+                    
+                } catch (const std::exception& e) {
+                    std::cerr << "Error in mode 4: " << e.what() << std::endl;
+                    return 1;
+                }
+
+                break;
             default:
                 throw std::invalid_argument("Invalid mode selected. Please choose 1, 2, or 3.");
         }
+
+        pthread_mutex_destroy(mutex);
+        munmap(mutex, sizeof(pthread_mutex_t));
+
     } catch (const std::invalid_argument& e) {
         std::cerr << "Error: " << e.what() << std::endl;
         return 1;
