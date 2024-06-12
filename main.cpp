@@ -119,7 +119,7 @@ void mode3(Adafruit_ADS1115 &ads)
     std::cout<<results * multiplier; 
     std::cout<<"mV)"<<std::endl;
 
-    usleep(10000);
+    usleep(1000);
     }
 }
 
