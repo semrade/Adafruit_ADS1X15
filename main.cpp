@@ -5,6 +5,7 @@
 #include <sys/mman.h>
 #include <sys/wait.h>
 #include <mutex>
+#include <cstring>
 #include "I2c.h"
 #include "Adafruit_ADS1X15.h"
 
@@ -31,28 +32,28 @@ void mode1(Adafruit_ADS1115 &ads) {
     //ads.startADCReading(ADS1X15_REG_CONFIG_MUX_SINGLE_0, /*continuous=*/true);
     
 
-    int16_t adc0, adc1, adc2, adc3;
-    float volts0, volts1, volts2, volts3;
+    int16_t adc[NUM_READINGS]={0};
+    float volts[NUM_READINGS]={0.0};
     while (1)
     {
 
-        adc0 = ads.readADC_SingleEnded(0);
-        adc1 = ads.readADC_SingleEnded(1);
-        adc2 = ads.readADC_SingleEnded(2);
-        adc3 = ads.readADC_SingleEnded(3);
+        adc[0] = ads.readADC_SingleEnded(0);
+        adc[1] = ads.readADC_SingleEnded(1);
+        adc[2] = ads.readADC_SingleEnded(2);
+        adc[3] = ads.readADC_SingleEnded(3);
 
-        volts0 = ads.computeVolts(adc0);
-        volts1 = ads.computeVolts(adc1);
-        volts2 = ads.computeVolts(adc2);
-        volts3 = ads.computeVolts(adc3);
+        volts[0] = ads.computeVolts(adc[0]);
+        volts[1] = ads.computeVolts(adc[1]);
+        volts[2] = ads.computeVolts(adc[2]);
+        volts[3] = ads.computeVolts(adc[3]);
 
         cout<<"-----------------------------------------------------------"<<endl;
-        cout<<"AIN0: "<<adc0<<"  "<<volts0<<"V"<<endl;
-        cout<<"AIN1: "<<adc1<<"  "<<volts1<<"V"<<endl;
-        cout<<"AIN2: "<<adc2<<"  "<<volts2<<"V"<<endl;
-        cout<<"AIN3: "<<adc3<<"  "<<volts3<<"V"<<endl;
+        cout<<"AIN0: "<<adc[0]<<"  "<<volts[0]<<"V"<<endl;
+        cout<<"AIN1: "<<adc[1]<<"  "<<volts[1]<<"V"<<endl;
+        cout<<"AIN2: "<<adc[2]<<"  "<<volts[2]<<"V"<<endl;
+        cout<<"AIN3: "<<adc[3]<<"  "<<volts[3]<<"V"<<endl;
 
-        usleep(1000);
+        usleep(10000);
     }
         
 }
@@ -126,22 +127,78 @@ void mode3(Adafruit_ADS1115 &ads) {
     usleep(1000);
     }
 }
-void parentProcess(int pipe)
+void parentProcess(int pipe, Adafruit_ADS1115 &ads)
 {
-    int adc_values[4];
+    int16_t adc[NUM_READINGS]={0};
+    float volts[NUM_READINGS]={0};
+auto start = std::chrono::high_resolution_clock::now();    
+
+    adc[0] = ads.readADC_SingleEnded(0);
+    adc[1] = ads.readADC_SingleEnded(1);
+    adc[2] = ads.readADC_SingleEnded(2);
+    adc[3] = ads.readADC_SingleEnded(3);
+
+    volts[0] = ads.computeVolts(adc[0]);
+    volts[1] = ads.computeVolts(adc[1]);
+    volts[2] = ads.computeVolts(adc[2]);
+    volts[3] = ads.computeVolts(adc[3]);
+
+    //usleep(100);
 
     // Read ADC and send data to child
     // Envoyer les valeurs ADC au processus enfant
-    write(pipe, adc_values, sizeof(int) * NUM_READINGS);
+    if (write(pipe, adc, sizeof(int16_t) * NUM_READINGS) == -1)
+    {
+        std::cerr << "Erreur d'écriture dans le pipe pour les valeurs raw ADC: " << strerror(errno) << std::endl;
+    }
+    if (write(pipe, volts, sizeof(float) * NUM_READINGS) == -1)
+    {
+        std::cerr << "Erreur d'écriture dans le pipe pour les valeurs volt ADC : " << strerror(errno) << std::endl;
+    }
+auto end = std::chrono::high_resolution_clock::now();
+std::chrono::duration<double, std::milli> elapsed = end - start;
+std::cout << "Parent process time: " << elapsed.count() << " ms" << std::endl;
 }
 void childProcess(int pipe)
 {
-    int received_values[4];
-
+    int16_t raw_received_values[NUM_READINGS]={0};
+    float volt_received_values[NUM_READINGS]={0};
+auto start = std::chrono::high_resolution_clock::now();   
+    cout<<"-----------------------------------------------------------"<<endl;
+    cout<<"Getting single-ended readings from AIN0..3"<<endl;
+    cout<<"ADC Range: +/- 6.144V (1 bit = 3mV/ADS1015, 0.1875mV/ADS1115)"<<endl;
+    
+    if(read(pipe, raw_received_values, sizeof(int16_t) * NUM_READINGS) == -1)
+    {
+        std::cerr << "Erreur de lecture du pipe pour les valeurs raw ADC: " << strerror(errno) << std::endl;
+    }
     // Lire les valeurs ADC du pipe
-    read(pipe, received_values, sizeof(int) * NUM_READINGS);
+    if(read(pipe, volt_received_values, sizeof(float) * NUM_READINGS) == -1)
+    {
+        std::cerr << "Erreur de lecture du pipe pour les valeurs volt ADC: " << strerror(errno) << std::endl;
+    }
+    
+    
+    // Affichage des valeurs
+    cout<<"-----------------------------------------------------------"<<endl;
+    cout<<"AIN0: "<<raw_received_values[0]<<"  "<<volt_received_values[0]<<"V"<<endl;
+    cout<<"AIN1: "<<raw_received_values[1]<<"  "<<volt_received_values[1]<<"V"<<endl;
+    cout<<"AIN2: "<<raw_received_values[2]<<"  "<<volt_received_values[2]<<"V"<<endl;
+    cout<<"AIN3: "<<raw_received_values[3]<<"  "<<volt_received_values[3]<<"V"<<endl;
+auto end = std::chrono::high_resolution_clock::now();
+std::chrono::duration<double, std::milli> elapsed = end - start;
+std::cout <<  "Child process time: " << elapsed.count() << " ms" << std::endl;
 }
 int main(int argc, char* argv[]) {
+    /******************** pour rendre le process plus prioritaire **********************/
+    struct sched_param param;
+    param.sched_priority = 99; // Priorité entre 1 (basse) et 99 (élevée)
+
+    if (sched_setscheduler(0, SCHED_FIFO, &param) != 0) {
+        std::cerr << "Erreur lors de la définition de l'ordonnancement en temps réel: " << strerror(errno) << std::endl;
+        return 1;
+    }
+    /**********************************************************************************/
 
     try {
         if (argc != 2) {
@@ -168,9 +225,8 @@ int main(int argc, char* argv[]) {
             exit(1);
         }
 
-        pid_t pid = fork();
-
-        Adafruit_ADS1115 ads;  /* Use this for the 16-bit version */
+        // Creat the ADS object
+        Adafruit_ADS1115 ads; 
 
         switch (mode) {
             case 1:
@@ -199,27 +255,34 @@ int main(int argc, char* argv[]) {
                 break;
             case 4:
                 try {
-                    if (pid > 0) {
-                    // Parent process
-                    while (true) {
-                        close(pipeFd[0]); // Close reading end
-                        pthread_mutex_lock(mutex);
-                        parentProcess(pipeFd[1]);
-                        pthread_mutex_unlock(mutex);
-                        close(pipeFd[1]); // Close writing end
-                        usleep(10000); // 10ms for data acquisition
+                    if (!ads.begin()) 
+                    {
+                        std::cerr<<"Failed to initialize ADS."<<std::endl;
+                        while (1);
                     }
-                    wait(nullptr);
-                } else {
-                    // Child process
-                    while (true) {
-                        close(pipeFd[1]); // Close writing end
-                        pthread_mutex_lock(mutex);
-                        childProcess(pipeFd[0]);
-                        pthread_mutex_unlock(mutex);
+                    pid_t pid = fork();
+                    if (pid > 0) 
+                    {
+                        // Parent process
                         close(pipeFd[0]); // Close reading end
-                        usleep(100000); // 100ms for data display
-                    }
+                        while (true) {
+                            pthread_mutex_lock(mutex);
+                            parentProcess(pipeFd[1], ads);
+                            pthread_mutex_unlock(mutex);
+                            usleep(40000); // 10ms for data acquisition
+                        }
+                        close(pipeFd[1]); // Close writing end
+                        wait(nullptr);
+                    } else {
+                        // Child process
+                        close(pipeFd[1]); // Close writing end
+                        while (true) {
+                            pthread_mutex_lock(mutex);
+                            childProcess(pipeFd[0]);
+                            pthread_mutex_unlock(mutex);
+                            usleep(100000); // 100ms for data display
+                        }
+                        close(pipeFd[0]); // Close reading end
                 }
                     
                 } catch (const std::exception& e) {
