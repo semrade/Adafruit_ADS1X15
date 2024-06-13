@@ -8,7 +8,6 @@
 #include <cstring>
 #include "I2c.h"
 #include "Adafruit_ADS1X15.h"
-#include "driver.h"
 
 using namespace std;
 
@@ -18,7 +17,7 @@ using namespace std;
 
 void update_display_int(char *format, int value);
 void update_display_double(char *format, double value);
-void display_values(const char* message);
+
 // Function declarations for each mode
 void mode1(Adafruit_ADS1115 &ads) {
     std::cout << "Mode 1 selected: Performing conversion 1." << std::endl;
@@ -95,6 +94,19 @@ void mode3(Adafruit_ADS1115 &ads) {
     std::cout << "Getting differential reading from AIN0 (P) and AIN1 (N)"<<std::endl;
     std::cout << "ADC Range: +/- 6.144V (1 bit = 3mV/ADS1015, 0.1875mV/ADS1115)"<<std::endl;
 
+    // The ADC input range (or gain) can be changed via the following
+    // functions, but be careful never to exceed VDD +0.3V max, or to
+    // exceed the upper and lower limits if you adjust the input range!
+    // Setting these values incorrectly may destroy your ADC!
+    //                                                                ADS1015  ADS1115
+    //                                                                -------  -------
+    // ads.setGain(GAIN_TWOTHIRDS);  // 2/3x gain +/- 6.144V  1 bit = 3mV      0.1875mV (default)
+    // ads.setGain(GAIN_ONE);        // 1x gain   +/- 4.096V  1 bit = 2mV      0.125mV
+    // ads.setGain(GAIN_TWO);        // 2x gain   +/- 2.048V  1 bit = 1mV      0.0625mV
+    // ads.setGain(GAIN_FOUR);       // 4x gain   +/- 1.024V  1 bit = 0.5mV    0.03125mV
+    // ads.setGain(GAIN_EIGHT);      // 8x gain   +/- 0.512V  1 bit = 0.25mV   0.015625mV
+    // ads.setGain(GAIN_SIXTEEN);    // 16x gain  +/- 0.256V  1 bit = 0.125mV  0.0078125mV
+
     if (!ads.begin()) {
         std::cout<<"Failed to initialize ADS."<<std::endl;
         while (1);
@@ -159,7 +171,6 @@ void childProcess(int pipe)
 {
     int16_t raw_received_values[NUM_READINGS]={0};
     float volt_received_values[NUM_READINGS]={0};
-    static int ctn = 0;
 #ifdef TELE    
 auto start = std::chrono::high_resolution_clock::now();   
 #endif
@@ -184,37 +195,6 @@ auto start = std::chrono::high_resolution_clock::now();
     cout<<"AIN1: "<<raw_received_values[1]<<"  "<<volt_received_values[1]<<"V"<<endl;
     cout<<"AIN2: "<<raw_received_values[2]<<"  "<<volt_received_values[2]<<"V"<<endl;
     cout<<"AIN3: "<<raw_received_values[3]<<"  "<<volt_received_values[3]<<"V"<<endl;
-
-        if (ctn < 10) {
-            // Affichage des valeurs brutes
-            // Clear SSD
-            //SSD1306_Fill(0x00);
-            SSD1306_SetCursor(2, 0);
-            display_values("ADS1115 raw values\n");
-
-            update_display_int("AIN0: : %d", raw_received_values[0]);
-            update_display_int("AIN1: : %d", raw_received_values[1]);
-            update_display_int("AIN2: : %d", raw_received_values[2]);
-            update_display_int("AIN3: : %d", raw_received_values[3]);
-        } else if (ctn < 20) {
-            // Affichage des valeurs physiques
-            // Clear the LCD
-            //SSD1306_Fill(0x00);
-            SSD1306_SetCursor(2, 0);
-            display_values("ADS1115 Phys values\n");
-
-            // Afficher les différentes valeurs
-            update_display_double("AIN0: : %.2f", volt_received_values[0]);
-            update_display_double("AIN1: : %.2f", volt_received_values[1]);
-            update_display_double("AIN2: : %.2f", volt_received_values[2]);
-            update_display_double("AIN3: : %.2f", volt_received_values[3]);
-        }
-
-        ctn++;
-        if (ctn >= 20) {
-            ctn = 0;  // Réinitialiser le compteur après 2000 cycles
-        }
-
 
 #ifdef TELE
     auto end = std::chrono::high_resolution_clock::now();
@@ -309,11 +289,6 @@ int main(int argc, char* argv[]) {
                     } else {
                         // Child process
                         close(pipeFd[1]); // Close writing end
-                        SSD1306_DisplayInit();
-                        SSD1306_SetCursor(0, 0);
-                        SSD1306_Fill(0x00);
-                        //SSD1306_String(reinterpret_cast<unsigned char*>("ADS1115 disp Values\n"));
-                        display_values("ADS1115 disp Values\n");
                         while (true) {
                             pthread_mutex_lock(mutex);
                             childProcess(pipeFd[0]);
@@ -371,7 +346,8 @@ void update_display_int(char *format, int value) {
     memcpy(buffer, temp_buffer, length);
 
     // Afficher le texte sur l'écran
-    display_values(buffer);
+    //print_all_chars(buffer);
+    SSD1306_String(buffer);
 }
 
 
@@ -395,12 +371,6 @@ void update_display_double(char *format, double value) {
     memcpy(buffer, temp_buffer, length);
 
     // Afficher le texte sur l'écran
-    display_values(buffer);
-}
-
-void display_values(const char* message) {
-    //const char* message = "ADS1115 disp Values\n";
-    unsigned char buffer[50]; // Assurez-vous que la taille est suffisante
-    std::strcpy(reinterpret_cast<char*>(buffer), message);
+    //print_all_chars(buffer);
     SSD1306_String(buffer);
 }
