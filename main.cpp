@@ -192,10 +192,10 @@ auto start = std::chrono::high_resolution_clock::now();
             SSD1306_SetCursor(2, 0);
             display_values("ADS1115 raw values\n");
 
-            update_display_int("AIN0: : %d", raw_received_values[0]);
-            update_display_int("AIN1: : %d", raw_received_values[1]);
-            update_display_int("AIN2: : %d", raw_received_values[2]);
-            update_display_int("AIN3: : %d", raw_received_values[3]);
+            update_display_int("AIN0: : %d LSB", raw_received_values[0]);
+            update_display_int("AIN1: : %d LSB", raw_received_values[1]);
+            update_display_int("AIN2: : %d LSB", raw_received_values[2]);
+            update_display_int("AIN3: : %d LSB", raw_received_values[3]);
         } else if (ctn < 20) {
             // Affichage des valeurs physiques
             // Clear the LCD
@@ -204,10 +204,10 @@ auto start = std::chrono::high_resolution_clock::now();
             display_values("ADS1115 Phys values\n");
 
             // Afficher les différentes valeurs
-            update_display_double("AIN0: : %.2f", volt_received_values[0]);
-            update_display_double("AIN1: : %.2f", volt_received_values[1]);
-            update_display_double("AIN2: : %.2f", volt_received_values[2]);
-            update_display_double("AIN3: : %.2f", volt_received_values[3]);
+            update_display_double("AIN0: : %.2f V", volt_received_values[0]);
+            update_display_double("AIN1: : %.2f V", volt_received_values[1]);
+            update_display_double("AIN2: : %.2f V", volt_received_values[2]);
+            update_display_double("AIN3: : %.2f V", volt_received_values[3]);
         }
 
         ctn++;
