@@ -16,7 +16,7 @@ using namespace std;
 
 #define NUM_READINGS 4
 #define BUFFER_SIZE 22
-//#define TELE 
+#define TELE 
 // Structure to hold the shared data
 struct SharedData {
     int16_t intArray[4];
@@ -289,7 +289,10 @@ void mode5(Adafruit_ADS1115 &ads, pthread_mutex_t* mutex)
         while (true) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
             pthread_mutex_lock(mutex);
-
+#ifdef TELE    
+auto start = std::chrono::high_resolution_clock::now();   
+#endif
+            
             // Affichage des valeurs
             cout<<"-----------------------------------------------------------"<<endl;
             cout<<"AIN0: "<<data->intArray[0]<<"  "<<data->floatArray[0]<<"V"<<endl;
@@ -326,6 +329,12 @@ void mode5(Adafruit_ADS1115 &ads, pthread_mutex_t* mutex)
             if (ctn >= 20) {
                 ctn = 0;  // Réinitialiser le compteur après 2000 cycles
             }
+            
+#ifdef TELE
+    auto end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double, std::milli> elapsed = end - start;
+    std::cout <<  "Child process time: " << elapsed.count() << " ms" << std::endl;
+#endif
             pthread_mutex_unlock(mutex);
         }
         // Unmap and close shared memory
@@ -343,8 +352,11 @@ void mode5(Adafruit_ADS1115 &ads, pthread_mutex_t* mutex)
         // Repeatedly write to shared memory every 100ms
         while (true) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
-
             pthread_mutex_lock(mutex);
+#ifdef TELE    
+auto start = std::chrono::high_resolution_clock::now();   
+#endif
+            
 
             tempIntArray[0] = ads.readADC_SingleEnded(0);
             tempIntArray[1] = ads.readADC_SingleEnded(1);
@@ -359,6 +371,12 @@ void mode5(Adafruit_ADS1115 &ads, pthread_mutex_t* mutex)
             std::memcpy(data->intArray, tempIntArray, sizeof(tempIntArray));
             std::memcpy(data->floatArray, tempFloatArray, sizeof(tempFloatArray));
 
+            
+#ifdef TELE
+    auto end = std::chrono::high_resolution_clock::now();
+    std::chrono::duration<double, std::milli> elapsed = end - start;
+    std::cout <<  "Parent process time: " << elapsed.count() << " ms" << std::endl;
+#endif
             pthread_mutex_unlock(mutex);
             }
 
