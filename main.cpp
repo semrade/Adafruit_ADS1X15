@@ -6,6 +6,8 @@
 #include <sys/wait.h>
 #include <mutex>
 #include <cstring>
+#include <thread>
+#include <chrono>
 #include "I2c.h"
 #include "Adafruit_ADS1X15.h"
 #include "driver.h"
@@ -15,7 +17,11 @@ using namespace std;
 #define NUM_READINGS 4
 #define BUFFER_SIZE 22
 //#define TELE 
-
+// Structure to hold the shared data
+struct SharedData {
+    int16_t intArray[4];
+    float floatArray[4];
+};
 void update_display_int(char *format, int value);
 void update_display_double(char *format, double value);
 void display_values(const char* message);
@@ -222,6 +228,151 @@ auto start = std::chrono::high_resolution_clock::now();
     std::cout <<  "Child process time: " << elapsed.count() << " ms" << std::endl;
 #endif
 }
+void mode5(Adafruit_ADS1115 &ads, pthread_mutex_t* mutex)
+{
+    const char* shm_name = "/my_shared_memory";
+    const int SIZE = sizeof(SharedData);
+    int ctn=0;
+
+    // Create shared memory object
+    int shm_fd = shm_open(shm_name, O_CREAT | O_RDWR, 0666);
+    if (shm_fd == -1) {
+        perror("shm_open");
+        return;
+    }
+
+    // Set the size of the shared memory object
+    if (ftruncate(shm_fd, SIZE) == -1) {
+        perror("ftruncate");
+        return;
+    }
+
+    // Map the shared memory object in the address space
+    void* ptr = mmap(0, SIZE, PROT_WRITE, MAP_SHARED, shm_fd, 0);
+    if (ptr == MAP_FAILED) {
+        perror("mmap");
+        return;
+    }
+    
+    if (!ads.begin()) 
+    {
+        std::cerr<<"Failed to initialize ADS."<<std::endl;
+        while (1);
+    }
+    // Fork the process
+    pid_t pid = fork();
+
+    if (pid < 0) {
+        perror("fork");
+        return;
+    }
+
+    if (pid == 0) {
+        // Child process
+        // Map the shared memory object in the address space
+        void* child_ptr = mmap(0, SIZE, PROT_READ, MAP_SHARED, shm_fd, 0);
+        if (child_ptr == MAP_FAILED) {
+            perror("mmap");
+            return;
+        }
+
+        // Cast the pointer to SharedData
+        SharedData* data = (SharedData*)child_ptr;
+
+        SSD1306_DisplayInit();
+        SSD1306_SetCursor(0, 0);
+        SSD1306_Fill(0x00);
+        //SSD1306_String(reinterpret_cast<unsigned char*>("ADS1115 disp Values\n"));
+        display_values("ADS1115 disp Values\n");
+        
+        // Repeatedly write to shared memory every 100ms
+        while (true) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            pthread_mutex_lock(mutex);
+
+            // Affichage des valeurs
+            cout<<"-----------------------------------------------------------"<<endl;
+            cout<<"AIN0: "<<data->intArray[0]<<"  "<<data->floatArray[0]<<"V"<<endl;
+            cout<<"AIN1: "<<data->intArray[1]<<"  "<<data->floatArray[1]<<"V"<<endl;
+            cout<<"AIN2: "<<data->intArray[2]<<"  "<<data->floatArray[2]<<"V"<<endl;
+            cout<<"AIN3: "<<data->intArray[3]<<"  "<<data->floatArray[3]<<"V"<<endl;
+
+            if (ctn < 10) {
+                // Affichage des valeurs brutes
+                // Clear SSD
+                //SSD1306_Fill(0x00);
+                SSD1306_SetCursor(2, 0);
+                display_values("ADS1115 raw values\n");
+
+                update_display_int("AIN0: : %d LSB", data->intArray[0]);
+                update_display_int("AIN1: : %d LSB", data->intArray[1]);
+                update_display_int("AIN2: : %d LSB", data->intArray[2]);
+                update_display_int("AIN3: : %d LSB", data->intArray[3]);
+            } else if (ctn < 20) {
+                // Affichage des valeurs physiques
+                // Clear the LCD
+                //SSD1306_Fill(0x00);
+                SSD1306_SetCursor(2, 0);
+                display_values("ADS1115 Phys values\n");
+
+                // Afficher les différentes valeurs
+                update_display_double("AIN0: : %.2f V", data->floatArray[0]);
+                update_display_double("AIN1: : %.2f V", data->floatArray[1]);
+                update_display_double("AIN2: : %.2f V", data->floatArray[2]);
+                update_display_double("AIN3: : %.2f V", data->floatArray[3]);
+            }
+
+            ctn++;
+            if (ctn >= 20) {
+                ctn = 0;  // Réinitialiser le compteur après 2000 cycles
+            }
+            pthread_mutex_unlock(mutex);
+        }
+        // Unmap and close shared memory
+        munmap(child_ptr, SIZE);
+        close(shm_fd);
+    } else {
+        // Parent process
+        // Cast the pointer to SharedData
+        SharedData* data = (SharedData*)ptr;
+        
+        // Write to shared memory
+        int16_t tempIntArray[4] = {0};
+        float tempFloatArray[4] = {0.0};
+        
+        // Repeatedly write to shared memory every 100ms
+        while (true) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+            pthread_mutex_lock(mutex);
+
+            tempIntArray[0] = ads.readADC_SingleEnded(0);
+            tempIntArray[1] = ads.readADC_SingleEnded(1);
+            tempIntArray[2] = ads.readADC_SingleEnded(2);
+            tempIntArray[3] = ads.readADC_SingleEnded(3);
+
+            tempFloatArray[0] = ads.computeVolts(tempIntArray[0]);
+            tempFloatArray[1] = ads.computeVolts(tempIntArray[1]);
+            tempFloatArray[2] = ads.computeVolts(tempIntArray[2]);
+            tempFloatArray[3] = ads.computeVolts(tempIntArray[3]);
+
+            std::memcpy(data->intArray, tempIntArray, sizeof(tempIntArray));
+            std::memcpy(data->floatArray, tempFloatArray, sizeof(tempFloatArray));
+
+            pthread_mutex_unlock(mutex);
+            }
+
+        // Wait for the child process to complete
+        wait(nullptr);
+
+        // Unmap and close shared memory
+        munmap(ptr, SIZE);
+        close(shm_fd);
+
+        // Remove the shared memory object
+        shm_unlink(shm_name);
+    }
+}
 int main(int argc, char* argv[]) {
     /******************** pour rendre le process plus prioritaire **********************/
     struct sched_param param;
@@ -286,7 +437,7 @@ int main(int argc, char* argv[]) {
                     return 1;
                 }
                 break;
-            case 4:
+            case 4:   //using pipe
                 try {
                     if (!ads.begin()) 
                     {
@@ -328,6 +479,20 @@ int main(int argc, char* argv[]) {
                     return 1;
                 }
 
+                break;
+            case 5: //using shared memory
+                try
+                {
+                    mode5(ads, mutex);
+                }
+                catch (const std::exception& e) {
+                    std::cerr << "Error in mode 5: " << e.what() << std::endl;
+                    return 1;
+                }
+                
+                break;
+
+            case 6: //using semaphore
                 break;
             default:
                 throw std::invalid_argument("Invalid mode selected. Please choose 1, 2, or 3.");
